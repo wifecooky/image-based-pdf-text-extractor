@@ -17,6 +17,7 @@
   - `pip install -r requirements.txt`
 - 2. run
   - `python main.py`
+- 3. check the result in the `extracted_data.csv` file.
 
 # Process Flow
 
