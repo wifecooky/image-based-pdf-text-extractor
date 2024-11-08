@@ -11,38 +11,19 @@ import numpy as np
 # ログ設定
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
-def extract_pcs_count_type_a(text):
-    pcs_matches = re.findall(r'(\d+)\s*個', text, re.IGNORECASE)
-    return ','.join(pcs_matches) if pcs_matches else ''
-
-def extract_pcs_count_type_b(text):
-    pcs_matches = re.findall(r'(\d+)\s*PCS', text, re.IGNORECASE)
-    return ','.join(pcs_matches) if pcs_matches else ''
-
-def extract_pcs_count_type_c(text):
-    pcs_matches = re.findall(r'kg\s*(\d+)', text, re.IGNORECASE)
-    return ','.join(pcs_matches) if pcs_matches else ''
-
 # PDFタイプと抽出ロジックの定義
 PDF_TYPES = {
     "TYPE-A": {
         "identifier": lambda text: "輸出許可通知書" in text,
-        "extractor": lambda text: {
-            "pcs_count": extract_pcs_count_type_a(text)
-        }
+        "extractor": lambda text: {}
     },
-    "TYPE-B": {
+    "Invoice": {
         "identifier": lambda text: "AWB No" in text,
-        "extractor": lambda text: {
-            "pcs_count": extract_pcs_count_type_b(text)
-        }
+        "extractor": lambda text: {}
     },
     "TYPE-C": {
         "identifier": lambda text: "WAYBILL" in text,
-        "extractor": lambda text: {
-            "pcs_count": extract_pcs_count_type_c(text)
-        }
+        "extractor": lambda text: {}
     }
     # 新しいPDFタイプをここに追加できます
 }
@@ -71,7 +52,7 @@ def extract_text_from_image(image):
     processed_image = preprocess_image(image)
     
     # pytesseractを使用してテキストを抽出（日本語と英語の両方に対応）
-    text = pytesseract.image_to_string(processed_image, lang='jpn+eng', config='--psm 6')
+    text = pytesseract.image_to_string(processed_image, lang='jpn+eng', config='--psm 6 --oem 1')
     return text
 
 def extract_text_from_pdf(pdf_path, image_output_dir):
@@ -103,7 +84,6 @@ def extract_text_from_pdf(pdf_path, image_output_dir):
         logging.error(f"Error converting PDF to images: {str(e)}")
         return ""
 
-
 def process_pdfs_to_csv(folder_path, output_csv, text_output_dir, image_output_dir):
     pdf_data = []
     
@@ -126,20 +106,49 @@ def process_pdfs_to_csv(folder_path, output_csv, text_output_dir, image_output_d
                 
                 elements = identify_and_extract(text)
                 elements['filename'] = filename
-                pdf_data.append(elements)
+                
+                # Only keep pdf_type, filename, and product_info
+                pdf_data.append({
+                    'pdf_type': elements['pdf_type'],
+                    'filename': elements['filename'],
+                    'product_info': ', '.join(elements.get('product_info', []))  # Join product_info list into a string
+                })
             except Exception as e:
                 logging.error(f"Failed to process {filename}: {str(e)}")
-                pdf_data.append({'filename': filename, 'pdf_type': 'Error', 'error': str(e), 'pcs_count': ''})
+                pdf_data.append({'pdf_type': 'Error', 'filename': filename, 'product_info': str(e)})
+    
+    # CSVファイルに書き込み
+    with open(output_csv, 'w', newline='', encoding='utf-8') as csvfile:
+        fieldnames = ['pdf_type', 'filename', 'product_info']  # Specify the desired fieldnames
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        writer.writeheader()
+        for data in pdf_data:
+            writer.writerow(data)
+
+def extract_product_info(text):
+    # 商品名とPCSの件数を抽出
+    product_pattern = r'(\d+)\s+(.*?)\s+\d+\.\d+\s+kg\s+\|\s+JAPAN\s+(\d+)\s*PCS'
+    matches = re.findall(product_pattern, text)
+    return [{'product_name': match[1], 'pcs_count': match[2]} for match in matches] if matches else []
+
+def format_product_info(product_info):
+    # 商品情報を指定されたフォーマットに変換
+    return [f"{item['product_name']}: {item['pcs_count']}" for item in product_info]
 
 def identify_and_extract(text):
     for pdf_type, config in PDF_TYPES.items():
         if config["identifier"](text):
             elements = config["extractor"](text)
             elements['pdf_type'] = pdf_type
+            
+            # 商品情報を抽出
+            product_info = extract_product_info(text)
+            elements['product_info'] = format_product_info(product_info)  # フォーマットを適用
+            
             return elements
     
     # 未知のPDFタイプの場合
-    return {'pdf_type': 'Unknown', 'pcs_count': ''}
+    return {'pdf_type': 'Unknown', 'product_info': []}
 
 def save_text_to_file(text, output_dir, filename):
     # テキストファイルの名前を生成（PDFファイル名と同じ名前で.txtの拡張子）
@@ -150,45 +159,8 @@ def save_text_to_file(text, output_dir, filename):
     with open(text_filepath, 'w', encoding='utf-8') as f:
         f.write(text)
 
-
-def process_pdfs_to_csv(folder_path, output_csv, text_output_dir, image_output_dir):
-    pdf_data = []
-    
-    # 出力ディレクトリが存在しない場合は作成
-    os.makedirs(text_output_dir, exist_ok=True)
-    os.makedirs(image_output_dir, exist_ok=True)
-    
-    for filename in os.listdir(folder_path):
-        if filename.lower().endswith('.pdf'):
-            file_path = os.path.join(folder_path, filename)
-            logging.info(f"Processing: {file_path}")
-            try:
-                text = extract_text_from_pdf(file_path, image_output_dir)
-                
-                # 抽出されたテキストを個別のファイルに保存
-                save_text_to_file(text, text_output_dir, filename)
-                
-                elements = identify_and_extract(text)
-                elements['filename'] = filename
-                pdf_data.append(elements)
-            except Exception as e:
-                logging.error(f"Failed to process {filename}: {str(e)}")
-                pdf_data.append({'filename': filename, 'pdf_type': 'Error', 'error': str(e), 'pcs_count': ''})
-    
-    # CSVファイルに書き込み
-    fieldnames = set()
-    for data in pdf_data:
-        fieldnames.update(data.keys())
-    
-    with open(output_csv, 'w', newline='', encoding='utf-8') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=list(fieldnames))
-        writer.writeheader()
-        for data in pdf_data:
-            writer.writerow(data)
-
-
 if __name__ == '__main__':
-    folder_path = './Data'  # PDFファイルが格納されているフォルダのパス
+    folder_path = './Data/'  # PDFファイルが格納されているフォルダのパス
     output_csv = 'extracted_data.csv'
     text_output_dir = './extracted_texts'  # 抽出されたテキスト(中間データ)を保存するディレクトリ
     image_output_dir = './extracted_images'  # 抽出された画像(中間データ)を保存するディレクトリ

@@ -31,6 +31,8 @@ extracted_images/
 extracted_texts/
 Data/
 extracted_data.csv
+.DS_Store
+.lh/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
