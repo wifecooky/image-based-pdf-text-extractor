@@ -17,7 +17,7 @@ PDF_TYPES = {
         "identifier": lambda text: "輸出許可通知書" in text,
         "extractor": lambda text: {}
     },
-    "Invoice": {
+    "BZ Invoice": {
         "identifier": lambda text: "AWB No" in text,
         "extractor": lambda text: {}
     },
@@ -127,8 +127,11 @@ def process_pdfs_to_csv(folder_path, output_csv, text_output_dir, image_output_d
 
 def extract_product_info(text):
     # 商品名とPCSの件数を抽出
-    product_pattern = r'(\d+)\s+(.*?)\s+\d+\.\d+\s+kg\s+\|\s+JAPAN\s+(\d+)\s*PCS'
+    # product_pattern = r'(\d+)\s+(.*?)\s+\d+\.\d+\s+kg\s+.*?\|\s+JAPAN\s+(\d+)\s*PCS'
+    product_pattern = r'(\d+)\s+(.*?)\s+\d+\.\d+\s+kg.*?\s+(\d+)\s*PCS'
+
     matches = re.findall(product_pattern, text)
+    print("matches: ", matches)
     return [{'product_name': match[1], 'pcs_count': match[2]} for match in matches] if matches else []
 
 def format_product_info(product_info):
@@ -142,6 +145,7 @@ def identify_and_extract(text):
             elements['pdf_type'] = pdf_type
             
             # 商品情報を抽出
+            print("find pdf type: ", pdf_type)
             product_info = extract_product_info(text)
             elements['product_info'] = format_product_info(product_info)  # フォーマットを適用
             
@@ -160,7 +164,7 @@ def save_text_to_file(text, output_dir, filename):
         f.write(text)
 
 if __name__ == '__main__':
-    folder_path = './Data/'  # PDFファイルが格納されているフォルダのパス
+    folder_path = '/Users/wenping.wang/Downloads/invoice-11/'  # PDFファイルが格納されているフォルダのパス
     output_csv = 'extracted_data.csv'
     text_output_dir = './extracted_texts'  # 抽出されたテキスト(中間データ)を保存するディレクトリ
     image_output_dir = './extracted_images'  # 抽出された画像(中間データ)を保存するディレクトリ
